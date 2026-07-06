@@ -1,0 +1,48 @@
+# Запуск: docker compose up -d --build
+# Приложение: http://localhost:8000, Swagger: http://localhost:8000/docs
+services:
+  app:
+    build: .
+    container_name: qr-payment-app
+    ports:
+      - "8000:8000"
+    environment:
+      # Хост "db" — имя сервиса PostgreSQL внутри сети compose.
+      DATABASE_URL: postgresql+asyncpg://payments:payments@db:5432/payments
+      # Лог обменов пишем в примонтированный каталог, чтобы он переживал
+      # пересоздание контейнера и был доступен с хоста.
+      EXCHANGE_LOG_FILE: /srv/logs/exchange.log
+    # Остальные переменные (QR_SERVICE_BASE_URL, WEBHOOK_BEARER_TOKEN и т.д.)
+    # берутся из .env — compose автоматически пробрасывает его в env_file.
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/srv/logs
+    depends_on:
+      db:
+        # Ждём не просто старта контейнера, а готовности БД принимать соединения.
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: qr-payment-db
+    environment:
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments
+      POSTGRES_DB: payments
+    ports:
+      # Наружу выставляем 5433, чтобы не конфликтовать с локальным Postgres на 5432.
+      - "5433:5432"
+    volumes:
+      # Именованный том — данные БД переживают пересоздание контейнера.
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
